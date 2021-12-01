@@ -63,8 +63,12 @@ __global__ void countRadixMultipleBlock(
   if (warp < radix_size) {
     index_t *global_count = counts + radix_size * slice + warp;
     local_count = shared_counts[lane][warp];
-    // TODO: warp shuffle down
-    gpuAtomicAddNoReturn(global_count, local_count);
+    for (int offset = 16; offset > 0; offset /= 2) {
+      local_count += WARP_SHFL_DOWN(local_count, offset);
+    }
+    if (lane == 0) {
+      gpuAtomicAddNoReturn(global_count, local_count);
+    }
   }
 }
 
