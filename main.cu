@@ -29,18 +29,18 @@ T *generateInput(int64_t numSlices, int64_t sliceSize, std::vector<int64_t> ks) 
         hi[j] = r;
       }
     }
-    for (int64_t l = 0; l < sliceSize; l++) {
-      std::cout << hi[l] << ", ";
-    }
-    std::cout << std::endl;
     std::shuffle(hi, hi + sliceSize, rng);
   }
   delete [] h;
-  return nullptr;
+  T *d;
+  size_t memsize = sizeof(T) * numSlices * sliceSize;
+  cudaMalloc(&d, memsize);
+  cudaMemcpy(d, h, memsize, cudaMemcpyDefault);
+  return d;
 }
 
 void testCountRadixMultipleBlock() {}
 
 int main() {
-  generateInput<int>(5, 10, {0, 3, 2, 1, 5});
+  int *input = generateInput<int>(5, 10, {0, 3, 2, 1, 5});
 }
