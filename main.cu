@@ -9,7 +9,7 @@ __device__ __forceinline__ bitwise_t highBitsFrom(int start) {
 }
 
 // This kernel must be launched with 1024 threads
-template<typename scalar_t, typename bitwise_t, typename index_t, int radix_bits, bool order, typename start_offset_t>
+template<typename scalar_t, typename bitwise_t, typename index_t, int radix_bits, typename start_offset_t>
 __launch_bounds__(1024)
 __global__ void countRadixMultipleBlock(
   scalar_t* data,
