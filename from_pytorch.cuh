@@ -1,6 +1,7 @@
 #pragma once
 #include "AsmUtils.cuh"
 #include "DeviceUtils.cuh"
+#include "Atomic.cuh"
 
 template <typename scalar_t>
 struct TopKTypeConfig {};
