@@ -24,39 +24,48 @@ __global__ void countRadixMultipleBlock(
 ) {
   constexpr int radix_size = (1 << radix_bits);
   constexpr int radix_mask = radix_size - 1;
+  static_assert(radix_size <= 32, "This implementation assumes radix_size <= 32");
 
   int blocksPerSlice = (sliceSize + itemsPerBlock - 1) / itemsPerBlock;
   int slice = blockIdx.x / blocksPerSlice;
   if (slice >= numSlices) return;
   int blockInSlice = blockIdx.x % blocksPerSlice;
+  int warp = threadIdx.x / 32;
+  int lane = threadIdx.x % 32;
 
   scalar_t *sliceData = data + startOffset(slice);
 
   // Each thread count number of items locally.
   // There are 32 * 32 thread-local counts in each block.
   bitwise_t desiredMask = highBitsFrom<bitwise_t>(startBit + radix_bits);
-  index_t local_counts[radix_size] = {0};
+  index_t local_count = 0;  // The lane i's thread-local variable stores the count of radix i for each warp.
   for (index_t i = blockInSlice * 1024 + threadIdx.x; i < sliceSize; i += blocksPerSlice * 1024) {
     scalar_t raw_value = doLdg(sliceData + withinSliceStride * i);
     bitwise_t value = TopKTypeConfig<scalar_t>::convert(raw_value);
     bool hasVal = ((value & desiredMask) == desired[slice]);
-    if (hasVal) {
-      bitwise_t digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(value, startBit, radix_bits);
-      #pragma unroll
-      for (uint32_t j = 0; j < radix_size; ++j) {
-        local_counts[j] +=  static_cast<int>(digitInRadix == j);
-      }
+    bitwise_t digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(value, startBit, radix_bits);
+    #pragma unroll
+    for (uint32_t j = 0; j < radix_size; ++j) {
+      bool vote = hasVal && (digitInRadix == j);
+      int count = __popc(WARP_BALLOT(vote, ACTIVE_MASK()));
+      local_count += (j == lane ? count : 0);
     }
   }
 
-  // Each warp merge its 32 thread local counts into one,
-  // Reducing 32 * 32 counts into 32 counts.
-  int warp = threadIdx.x / 32;
-  int lane = threadIdx.x % 32;
+  // Each warp write its values to shared memory.
+  __shared__ index_t shared_counts[32][radix_size];
+  if (lane < radix_size) {
+    shared_counts[warp][lane] = local_count;
+  }
+  __syncthreads();
 
-  // The first warp merge all remaining 32 counts into one.
-
-  // The first thread uses atomic add to update global counts.
+  // Each warp computes the block level count, and uses atomic add to update global counts.
+  if (warp < radix_size) {
+    index_t *global_count = counts + radix_size * slice + warp;
+    local_count = shared_counts[lane][warp];
+    // TODO: warp shuffle down
+    gpuAtomicAddNoReturn(global_count, local_count);
+  }
 }
 
 
